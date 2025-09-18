@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Retro Co-op Platformer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <section id="menu-screen" class="screen active">
+        <h1>Retro Co-op Platformer</h1>
+        <div class="panel">
+          <h2>Top Runs</h2>
+          <ol id="leaderboard-list"></ol>
+        </div>
+        <button id="menu-join-btn" class="primary">Join</button>
+      </section>
+
+      <section id="join-screen" class="screen hidden">
+        <h2>Connect</h2>
+        <label class="field">
+          <span>Display Name</span>
+          <input id="display-name" type="text" maxlength="24" autocomplete="off" />
+        </label>
+        <div class="button-row">
+          <button id="create-lobby-nav" class="primary">Create Lobby</button>
+          <button id="browse-lobbies-nav">Join Lobby</button>
+        </div>
+        <button class="link back-to-menu">Back to Menu</button>
+      </section>
+
+      <section id="create-screen" class="screen hidden">
+        <h2>Create Lobby</h2>
+        <p>Select player count:</p>
+        <div class="button-row" id="player-count-buttons">
+          <button data-count="1">1 Player</button>
+          <button data-count="2">2 Players</button>
+          <button data-count="3">3 Players</button>
+        </div>
+        <button id="create-lobby-confirm" class="primary">Start Lobby</button>
+        <button class="link back-to-join">Back</button>
+      </section>
+
+      <section id="lobby-list-screen" class="screen hidden">
+        <h2>Open Lobbies</h2>
+        <div id="lobby-list" class="panel"></div>
+        <button class="link back-to-join">Back</button>
+      </section>
+
+      <section id="lobby-screen" class="screen hidden">
+        <h2>Lobby <span id="lobby-id"></span></h2>
+        <p>Leader: <span id="lobby-leader"></span></p>
+        <ul id="lobby-players"></ul>
+        <div class="button-row">
+          <button id="start-game-btn" class="primary">Start Game</button>
+          <button id="leave-lobby-btn" class="danger">Leave Lobby</button>
+        </div>
+        <div id="lobby-status" class="message"></div>
+      </section>
+
+      <section id="game-screen" class="screen hidden">
+        <canvas id="game" width="960" height="540"></canvas>
+        <div id="hud">
+          <div id="hud-timer">00:00.000</div>
+          <div id="hud-dots">Dots: 0/0</div>
+        </div>
+        <button id="game-exit-btn" class="link">Leave Lobby</button>
+      </section>
+
+      <section id="win-screen" class="screen hidden">
+        <h2>You Won!</h2>
+        <div id="win-time">Time: 00:00.000</div>
+        <form id="score-form">
+          <label class="field">
+            <span>Team Name</span>
+            <input id="team-name" type="text" maxlength="24" autocomplete="off" />
+          </label>
+          <button type="submit" class="primary">Submit Score</button>
+        </form>
+        <p id="win-waiting" class="hidden">Waiting for leader to submit...</p>
+      </section>
+    </div>
+
+    <div id="notification" class="hidden"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/game.js" type="module"></script>
+  </body>
+</html>
