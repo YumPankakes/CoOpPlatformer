@@ -1,0 +1,173 @@
+@import url("https://fonts.googleapis.com/css2?family=VT323&display=swap");
+
+:root {
+  --bg: #0d0d0d;
+  --fg: #f6f6f6;
+  --accent: #9ef7ff;
+  --warning: #ff7b7b;
+  --panel-bg: rgba(15, 15, 15, 0.9);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "VT323", monospace;
+  background: var(--bg);
+  color: var(--fg);
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#app {
+  position: relative;
+  width: 960px;
+  height: 540px;
+  border: 4px solid var(--fg);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
+
+.panel {
+  position: absolute;
+  inset: 40px;
+  background: var(--panel-bg);
+  border: 2px solid var(--fg);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.panel.visible {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.panel.hidden {
+  pointer-events: none;
+  opacity: 0;
+}
+
+h1,
+ h2,
+ h3 {
+  margin: 0;
+  letter-spacing: 0.08em;
+}
+
+p,
+button,
+input,
+ol,
+ul,
+li {
+  font-size: 20px;
+  margin: 0;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 260px;
+}
+
+input {
+  padding: 10px;
+  border: 2px solid var(--fg);
+  background: transparent;
+  color: var(--fg);
+  font-size: 20px;
+  text-align: center;
+}
+
+button {
+  padding: 10px 16px;
+  border: 2px solid var(--fg);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+button:hover,
+button:focus {
+  background: var(--fg);
+  color: var(--bg);
+}
+
+.error {
+  color: var(--warning);
+  min-height: 24px;
+}
+
+.hint {
+  font-size: 16px;
+  opacity: 0.7;
+}
+
+#hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+}
+
+#timer-display {
+  font-size: 32px;
+  letter-spacing: 0.1em;
+}
+
+#ability-display {
+  display: flex;
+  flex-direction: column;
+  font-size: 20px;
+}
+
+#ability-name {
+  font-size: 24px;
+}
+
+#ability-status {
+  font-size: 18px;
+  opacity: 0.8;
+}
+
+#status-line {
+  font-size: 18px;
+  min-height: 22px;
+}
+
+#leaderboard-overlay ol {
+  list-style: decimal-leading-zero inside;
+  padding: 0;
+  width: 100%;
+  text-align: left;
+}
+
+#leaderboard-overlay li {
+  padding: 2px 0;
+}
