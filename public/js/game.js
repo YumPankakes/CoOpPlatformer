@@ -1,638 +1,847 @@
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-const timerEl = document.getElementById("timer");
-const abilityEl = document.getElementById("ability-info");
-const statusEl = document.getElementById("status-message");
-const leaderboardEl = document.getElementById("leaderboard");
-const leaderboardListEl = document.getElementById("leaderboard-list");
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
 
-const socket = io();
+  const joinScreen = document.getElementById("join-screen");
+  const joinForm = document.getElementById("join-form");
+  const nameInput = document.getElementById("name-input");
+  const joinError = document.getElementById("join-error");
 
-const state = {
-  level: null,
-  players: new Map(),
-  localPlayerId: null,
-  startTime: Date.now(),
-  levelComplete: false,
-  completeTime: 0,
-  leaderboard: [],
-  status: {
-    message: "",
-    expires: 0,
-  },
-};
+  const timerDisplay = document.getElementById("timer-display");
+  const abilityNameEl = document.getElementById("ability-name");
+  const abilityStatusEl = document.getElementById("ability-status");
+  const statusLineEl = document.getElementById("status-line");
 
-const abilityEffects = {
-  phaseActive: false,
-  phaseTimer: 0,
-  phaseConsumed: false,
-  dashTimer: 0,
-  dashDirection: 1,
-  gravityInverted: false,
-  ceilingTimer: 0,
-};
+  const leaderboardOverlay = document.getElementById("leaderboard-overlay");
+  const leaderboardList = document.getElementById("leaderboard-list");
+  const completionTimeEl = document.getElementById("completion-time");
+  const closeLeaderboardBtn = document.getElementById("close-leaderboard");
 
-const npcState = {
-  messageIndex: 0,
-  targetText: "",
-  displayedText: "",
-  timer: 0,
-  pauseTimer: 0,
-  typingSpeed: 35,
-  pauseDuration: 2000,
-};
+  const socket = io();
 
-const input = {
-  left: false,
-  right: false,
-  jump: false,
-  jumpQueued: false,
-};
-
-function createPlayer(data) {
-  return {
-    id: data.id,
-    ability: data.ability,
-    abilityName: data.abilityName,
-    color: data.color || "#ffffff",
-    spectator: data.spectator,
-    width: 32,
-    height: 48,
-    position: { x: data.position.x, y: data.position.y },
-    velocity: { x: data.velocity.x, y: data.velocity.y },
-    goalReached: data.goalReached,
-    abilityUsed: data.abilityUsed,
-    onGround: false,
+  const inputState = {
+    left: false,
+    right: false,
+    jump: false,
+    ability: false,
   };
-}
 
-function setStatus(message, duration = 3000) {
-  state.status.message = message;
-  state.status.expires = performance.now() + duration;
-  statusEl.textContent = message;
-}
-
-function updateStatus(now) {
-  if (state.status.expires && now > state.status.expires) {
-    state.status.message = "";
-    state.status.expires = 0;
-    statusEl.textContent = "";
-  }
-}
-
-function updateAbilityInfo() {
-  const player = state.players.get(state.localPlayerId);
-  if (!player) {
-    abilityEl.textContent = "Ability: --";
-    return;
-  }
-  const suffix = player.abilityUsed ? " (used)" : "";
-  abilityEl.textContent = `Ability: ${player.abilityName || "Spectator"}${suffix}`;
-}
-
-function updateLeaderboard(entries) {
-  state.leaderboard = entries || [];
-  leaderboardListEl.innerHTML = "";
-  if (!state.leaderboard.length) {
-    const emptyLi = document.createElement("li");
-    emptyLi.textContent = "No runs yet";
-    leaderboardListEl.appendChild(emptyLi);
-    return;
-  }
-  state.leaderboard.forEach((entry) => {
-    const li = document.createElement("li");
-    const seconds = (entry.timeMs / 1000).toFixed(3);
-    const names = (entry.players || []).join(", ") || "Team";
-    const date = new Date(entry.recordedAt).toLocaleTimeString();
-    li.textContent = `${seconds}s - ${names} @ ${date}`;
-    leaderboardListEl.appendChild(li);
-  });
-}
-
-function resetAbilityEffects() {
-  abilityEffects.phaseActive = false;
-  abilityEffects.phaseTimer = 0;
-  abilityEffects.phaseConsumed = false;
-  abilityEffects.dashTimer = 0;
-  abilityEffects.dashDirection = 1;
-  abilityEffects.gravityInverted = false;
-  abilityEffects.ceilingTimer = 0;
-}
-
-function requestAbility() {
-  const player = state.players.get(state.localPlayerId);
-  if (!player || player.spectator || player.abilityUsed) {
-    return;
-  }
-  socket.emit("requestAbility");
-}
-
-function activateAbility(ability) {
-  const player = state.players.get(state.localPlayerId);
-  if (!player) {
-    return;
-  }
-  player.abilityUsed = true;
-  updateAbilityInfo();
-  switch (ability) {
-    case "phase":
-      abilityEffects.phaseActive = true;
-      abilityEffects.phaseConsumed = false;
-      abilityEffects.phaseTimer = 1800;
-      setStatus("Phase Walker: Ghost mode!", 1500);
-      break;
-    case "dash":
-      abilityEffects.dashTimer = 220;
-      abilityEffects.dashDirection = input.left ? -1 : input.right ? 1 : player.velocity.x >= 0 ? 1 : -1;
-      setStatus("Dash Sprinter: Zoom!", 1500);
-      break;
-    case "ceiling":
-      abilityEffects.gravityInverted = true;
-      abilityEffects.ceilingTimer = 4500;
-      setStatus("Ceiling Walker: Gravity flipped!", 2000);
-      break;
-    default:
-      break;
-  }
-}
-
-function updateAbilityTimers(delta) {
-  if (abilityEffects.phaseActive) {
-    abilityEffects.phaseTimer -= delta;
-    if (abilityEffects.phaseTimer <= 0) {
-      abilityEffects.phaseActive = false;
-      abilityEffects.phaseTimer = 0;
-    }
-  }
-  if (abilityEffects.dashTimer > 0) {
-    abilityEffects.dashTimer -= delta;
-    if (abilityEffects.dashTimer <= 0) {
-      abilityEffects.dashTimer = 0;
-    }
-  }
-  if (abilityEffects.gravityInverted) {
-    abilityEffects.ceilingTimer -= delta;
-    if (abilityEffects.ceilingTimer <= 0) {
-      abilityEffects.gravityInverted = false;
-      abilityEffects.ceilingTimer = 0;
-    }
-  }
-}
-
-function rectsIntersect(a, b) {
-  return !(
-    a.x + a.width <= b.x ||
-    a.x >= b.x + b.width ||
-    a.y + a.height <= b.y ||
-    a.y >= b.y + b.height
-  );
-}
-
-function handleHorizontalCollisions(player, nextX) {
-  if (!state.level) return nextX;
-  const rect = {
-    x: nextX,
-    y: player.position.y,
-    width: player.width,
-    height: player.height,
+  const timerState = {
+    running: false,
+    startTime: null,
+    elapsed: 0,
   };
-  let collided = false;
-  for (const wall of state.level.walls || []) {
-    const wallRect = { ...wall };
-    if (rectsIntersect(rect, wallRect)) {
-      if (abilityEffects.phaseActive && !abilityEffects.phaseConsumed) {
-        abilityEffects.phaseConsumed = true;
-        continue;
-      }
-      collided = true;
-      if (player.velocity.x > 0) {
-        nextX = wall.x - player.width;
-      } else if (player.velocity.x < 0) {
-        nextX = wall.x + wall.width;
-      }
-      player.velocity.x = 0;
-    }
-  }
-  if (!collided && abilityEffects.phaseActive && abilityEffects.phaseConsumed) {
-    // Phase is consumed after passing through one wall. Turn it off once clear.
-    const stillInside = (state.level.walls || []).some((wall) =>
-      rectsIntersect(rect, wall)
-    );
-    if (!stillInside) {
-      abilityEffects.phaseActive = false;
-    }
-  }
-  return Math.max(0, Math.min(nextX, state.level.world.width - player.width));
-}
 
-function handleVerticalCollisions(player, currentX, nextY) {
-  if (!state.level) return { y: nextY, onGround: false };
-  const rect = {
-    x: currentX,
-    y: nextY,
-    width: player.width,
-    height: player.height,
+  const constants = {
+    playerWidth: 32,
+    playerHeight: 48,
+    moveSpeed: 220,
+    accel: 1400,
+    airAccel: 1000,
+    friction: 0.8,
+    jumpSpeed: 520,
+    dashSpeed: 560,
+    dashDuration: 0.22,
+    phaseDuration: 1.5,
+    ceilingDuration: 5,
+    maxFallSpeed: 900,
   };
-  const gravityDir = abilityEffects.gravityInverted ? -1 : 1;
-  let onGround = false;
 
-  for (const wall of state.level.walls || []) {
-    const wallRect = { ...wall };
-    if (rectsIntersect(rect, wallRect)) {
-      if (abilityEffects.phaseActive && !abilityEffects.phaseConsumed) {
-        abilityEffects.phaseConsumed = true;
-        continue;
-      }
-      if (player.velocity.y * gravityDir > 0) {
-        // moving with gravity
-        if (gravityDir > 0) {
-          nextY = wall.y - player.height;
-        } else {
-          nextY = wall.y + wall.height;
-        }
-        onGround = true;
-      } else {
-        if (gravityDir > 0) {
-          nextY = wall.y + wall.height;
-        } else {
-          nextY = wall.y - player.height;
-        }
-      }
-      player.velocity.y = 0;
-    }
+  const players = new Map();
+  let level = null;
+  let session = null;
+  let leaderboard = [];
+  let localPlayerId = null;
+  let abilityInfo = null;
+
+  const bobbyState = {
+    lines: [],
+    currentLine: 0,
+    charIndex: 0,
+    textSpeed: 40,
+    lastUpdate: 0,
+    holdTimer: 0,
+    visibleText: "",
+  };
+
+  function setJoinScreenVisible(visible) {
+    joinScreen.classList.toggle("visible", visible);
+    joinScreen.classList.toggle("hidden", !visible);
   }
 
-  // Floor / ceiling collisions
-  const floorY = state.level.floor?.y ?? state.level.world.height - 40;
-  const ceilingY = state.level.floor?.height ?? 40;
-
-  if (gravityDir > 0) {
-    if (nextY + player.height >= floorY) {
-      nextY = floorY - player.height;
-      player.velocity.y = 0;
-      onGround = true;
-    }
-    if (nextY < 0) {
-      nextY = 0;
-      player.velocity.y = 0;
-    }
-  } else {
-    if (nextY <= ceilingY) {
-      nextY = ceilingY;
-      player.velocity.y = 0;
-      onGround = true;
-    }
-    if (nextY + player.height > state.level.world.height) {
-      nextY = state.level.world.height - player.height;
-      player.velocity.y = 0;
-    }
+  function showLeaderboardOverlay(show) {
+    leaderboardOverlay.classList.toggle("visible", show);
+    leaderboardOverlay.classList.toggle("hidden", !show);
   }
 
-  return { y: nextY, onGround };
-}
+  function formatTime(ms) {
+    const totalSeconds = ms / 1000;
+    const minutes = Math.floor(totalSeconds / 60)
+      .toString()
+      .padStart(2, "0");
+    const seconds = Math.floor(totalSeconds % 60)
+      .toString()
+      .padStart(2, "0");
+    const millis = Math.floor(ms % 1000)
+      .toString()
+      .padStart(3, "0");
+    return `${minutes}:${seconds}.${millis}`;
+  }
 
-function updateLocalPlayer(player, delta) {
-  updateAbilityTimers(delta);
+  function updateTimerDisplay() {
+    if (timerState.running && timerState.startTime != null) {
+      const now = performance.now();
+      timerState.elapsed = now - timerState.startTime;
+    }
+    timerDisplay.textContent = formatTime(timerState.elapsed || 0);
+  }
 
-  const gravity = state.level.world.gravity;
-  const gravityDir = abilityEffects.gravityInverted ? -1 : 1;
-  const accel = 0.65;
-  const maxSpeed = abilityEffects.dashTimer > 0 ? 14 : 4;
-  const friction = 0.7;
-  const jumpVelocity = 11;
-
-  if (abilityEffects.dashTimer > 0) {
-    player.velocity.x = abilityEffects.dashDirection * maxSpeed;
-  } else {
-    if (input.left && !input.right) {
-      player.velocity.x = Math.max(player.velocity.x - accel, -maxSpeed);
-    } else if (input.right && !input.left) {
-      player.velocity.x = Math.min(player.velocity.x + accel, maxSpeed);
+  function updateAbilityUI() {
+    if (!abilityInfo) {
+      abilityNameEl.textContent = "Ability";
+      abilityStatusEl.textContent = "Waiting...";
+      return;
+    }
+    abilityNameEl.textContent = abilityInfo.name;
+    const player = players.get(localPlayerId);
+    if (!player) {
+      abilityStatusEl.textContent = "Waiting...";
+      return;
+    }
+    if (player.abilityState.ceilingActive) {
+      abilityStatusEl.textContent = "Gravity flipped";
+    } else if (player.abilityState.dashActive) {
+      abilityStatusEl.textContent = "Dashing";
+    } else if (player.abilityState.phaseActive) {
+      abilityStatusEl.textContent = "Phase active";
+    } else if (player.abilityUsed) {
+      abilityStatusEl.textContent = "Ability spent";
+    } else if (session && session.waitingForPlayers) {
+      abilityStatusEl.textContent = "Waiting for team";
     } else {
-      player.velocity.x *= friction;
-      if (Math.abs(player.velocity.x) < 0.05) {
-        player.velocity.x = 0;
+      abilityStatusEl.textContent = "Ready";
+    }
+  }
+
+  function updateStatusLine(message) {
+    if (message) {
+      statusLineEl.textContent = message;
+      return;
+    }
+    if (!session) {
+      statusLineEl.textContent = "";
+      return;
+    }
+    if (session.waitingForPlayers) {
+      statusLineEl.textContent = "Waiting for 3 players...";
+    } else if (session.completed) {
+      statusLineEl.textContent = "Level complete!";
+    } else if (!timerState.running) {
+      statusLineEl.textContent = "Team ready. Start moving!";
+    } else {
+      statusLineEl.textContent = "";
+    }
+  }
+
+  function updateLeaderboardList() {
+    leaderboardList.innerHTML = "";
+    if (!leaderboard || leaderboard.length === 0) {
+      const li = document.createElement("li");
+      li.textContent = "No runs recorded yet.";
+      leaderboardList.appendChild(li);
+      return;
+    }
+    leaderboard.forEach((entry) => {
+      const li = document.createElement("li");
+      li.textContent = `${entry.teamName || "Team"} — ${formatTime(entry.timeMs)}`;
+      leaderboardList.appendChild(li);
+    });
+  }
+
+  function resetTimerFromSession(newSession) {
+    if (!newSession) {
+      timerState.running = false;
+      timerState.startTime = null;
+      timerState.elapsed = 0;
+      return;
+    }
+    if (newSession.timerRunning && newSession.timerStartedAt) {
+      timerState.running = true;
+      timerState.startTime = performance.now() - (Date.now() - newSession.timerStartedAt);
+    } else {
+      timerState.running = false;
+      timerState.startTime = null;
+      timerState.elapsed = newSession.completionTime || 0;
+    }
+  }
+
+  function createPlayer(snapshot) {
+    return {
+      id: snapshot.id,
+      name: snapshot.name,
+      abilityId: snapshot.abilityId,
+      abilityName: snapshot.abilityName,
+      position: { x: snapshot.position?.x || 0, y: snapshot.position?.y || 0 },
+      velocity: { x: snapshot.velocity?.x || 0, y: snapshot.velocity?.y || 0 },
+      width: constants.playerWidth,
+      height: constants.playerHeight,
+      facing: snapshot.facing || 1,
+      grounded: false,
+      gravityDir: 1,
+      abilityUsed: Boolean(snapshot.abilityUsed),
+      reachedGoal: Boolean(snapshot.reachedGoal),
+      spawnIndex: snapshot.spawnIndex || 0,
+      abilityState: {
+        phaseActive: false,
+        phaseTimer: 0,
+        dashActive: false,
+        dashTimer: 0,
+        dashDirection: 1,
+        ceilingActive: false,
+        ceilingTimer: 0,
+      },
+    };
+  }
+
+  function updatePlayerFromSnapshot(player, snapshot) {
+    player.name = snapshot.name;
+    player.abilityId = snapshot.abilityId;
+    player.abilityName = snapshot.abilityName;
+    if (snapshot.position && player.id !== localPlayerId) {
+      player.position.x = snapshot.position.x;
+      player.position.y = snapshot.position.y;
+    }
+    if (snapshot.velocity && player.id !== localPlayerId) {
+      player.velocity.x = snapshot.velocity.x;
+      player.velocity.y = snapshot.velocity.y;
+    }
+    player.facing = snapshot.facing || player.facing;
+    player.spawnIndex = snapshot.spawnIndex || player.spawnIndex;
+    player.abilityUsed = Boolean(snapshot.abilityUsed);
+    player.reachedGoal = Boolean(snapshot.reachedGoal);
+  }
+
+  function syncPlayers(sessionPlayers) {
+    const seen = new Set();
+    sessionPlayers.forEach((snapshot) => {
+      let player = players.get(snapshot.id);
+      if (!player) {
+        player = createPlayer(snapshot);
+        players.set(player.id, player);
+      } else {
+        updatePlayerFromSnapshot(player, snapshot);
+      }
+      seen.add(snapshot.id);
+    });
+    Array.from(players.keys()).forEach((id) => {
+      if (!seen.has(id)) {
+        players.delete(id);
+      }
+    });
+  }
+
+  function applyAbilityState(player, abilityId, context = {}) {
+    if (!player) {
+      return;
+    }
+    const abilityState = player.abilityState;
+    if (abilityId === "phase-walker") {
+      abilityState.phaseActive = true;
+      abilityState.phaseTimer = constants.phaseDuration;
+    } else if (abilityId === "dash-sprinter") {
+      const direction = context.direction === -1 ? -1 : 1;
+      abilityState.dashActive = true;
+      abilityState.dashTimer = constants.dashDuration;
+      abilityState.dashDirection = direction;
+      if (player.id === localPlayerId) {
+        player.velocity.x = direction * constants.dashSpeed;
+      }
+    } else if (abilityId === "ceiling-walker") {
+      abilityState.ceilingActive = true;
+      abilityState.ceilingTimer = constants.ceilingDuration;
+      player.gravityDir = -1;
+      if (player.id === localPlayerId) {
+        player.velocity.y = -constants.jumpSpeed;
+      }
+    }
+    player.abilityUsed = true;
+    updateAbilityUI();
+  }
+
+  function resetAbilityState(player) {
+    if (!player) {
+      return;
+    }
+    player.abilityUsed = false;
+    player.gravityDir = 1;
+    Object.assign(player.abilityState, {
+      phaseActive: false,
+      phaseTimer: 0,
+      dashActive: false,
+      dashTimer: 0,
+      dashDirection: player.abilityState.dashDirection || 1,
+      ceilingActive: false,
+      ceilingTimer: 0,
+    });
+  }
+
+  function handleRunReset(payload) {
+    session = payload.session;
+    leaderboard = payload.leaderboard || leaderboard;
+    updateLeaderboardList();
+    if (session) {
+      syncPlayers(session.players || []);
+      resetTimerFromSession(session);
+    }
+    players.forEach((player) => {
+      resetAbilityState(player);
+      if (session) {
+        const snapshot = session.players.find((p) => p.id === player.id);
+        if (snapshot) {
+          player.position.x = snapshot.position.x;
+          player.position.y = snapshot.position.y;
+          player.velocity.x = 0;
+          player.velocity.y = 0;
+        }
+      }
+    });
+    timerState.elapsed = 0;
+    timerState.running = false;
+    timerState.startTime = null;
+    showLeaderboardOverlay(false);
+    updateStatusLine(payload.message);
+    updateAbilityUI();
+  }
+
+  function setSession(newSession) {
+    session = newSession;
+    if (session) {
+      syncPlayers(session.players || []);
+      resetTimerFromSession(session);
+    }
+    updateStatusLine();
+    updateAbilityUI();
+  }
+
+  function ensureLocalPlayer() {
+    if (!localPlayerId) {
+      return null;
+    }
+    return players.get(localPlayerId) || null;
+  }
+
+  function applyInputToPlayer(player, delta) {
+    if (!player) {
+      return;
+    }
+    const accel = player.grounded ? constants.accel : constants.airAccel;
+    const direction = inputState.right === inputState.left ? 0 : inputState.right ? 1 : -1;
+    if (!player.abilityState.dashActive) {
+      if (direction !== 0) {
+        player.velocity.x += direction * accel * delta;
+        const maxSpeed = constants.moveSpeed;
+        if (player.velocity.x > maxSpeed) player.velocity.x = maxSpeed;
+        if (player.velocity.x < -maxSpeed) player.velocity.x = -maxSpeed;
+        player.facing = direction >= 0 ? 1 : -1;
+      } else {
+        player.velocity.x *= player.grounded ? constants.friction : 0.98;
+        if (Math.abs(player.velocity.x) < 1) {
+          player.velocity.x = 0;
+        }
+      }
+    } else {
+      player.velocity.x = player.abilityState.dashDirection * constants.dashSpeed;
+    }
+
+    const wantsJump = inputState.jump;
+    if (wantsJump && player.grounded) {
+      const jumpDirection = player.gravityDir === -1 ? -1 : 1;
+      player.velocity.y = -jumpDirection * constants.jumpSpeed;
+      player.grounded = false;
+    }
+  }
+
+  function clampWorld(player) {
+    if (!level) return;
+    const world = level.world;
+    if (player.position.x < 0) {
+      player.position.x = 0;
+      player.velocity.x = Math.max(0, player.velocity.x);
+    }
+    const maxX = world.width - player.width;
+    if (player.position.x > maxX) {
+      player.position.x = maxX;
+      player.velocity.x = Math.min(0, player.velocity.x);
+    }
+    if (player.position.y < 0) {
+      player.position.y = 0;
+      if (player.gravityDir === -1) {
+        player.grounded = true;
+        player.velocity.y = Math.max(0, player.velocity.y);
+      } else {
+        player.velocity.y = 0;
+      }
+    }
+    const maxY = world.height - player.height;
+    if (player.position.y > maxY) {
+      player.position.y = maxY;
+      if (player.gravityDir === 1) {
+        player.grounded = true;
+        player.velocity.y = Math.min(0, player.velocity.y);
+      } else {
+        player.velocity.y = 0;
       }
     }
   }
 
-  if (input.jumpQueued && player.onGround) {
-    player.velocity.y = -jumpVelocity * gravityDir;
-    player.onGround = false;
-    input.jumpQueued = false;
+  function rectanglesIntersect(a, b) {
+    return (
+      a.x < b.x + b.width &&
+      a.x + a.width > b.x &&
+      a.y < b.y + b.height &&
+      a.y + a.height > b.y
+    );
   }
 
-  player.velocity.y += gravity * gravityDir * (delta / 16.67);
-  player.velocity.y = Math.max(Math.min(player.velocity.y, 20), -20);
-
-  const nextX = handleHorizontalCollisions(player, player.position.x + player.velocity.x);
-  const verticalResult = handleVerticalCollisions(player, nextX, player.position.y + player.velocity.y);
-
-  player.position.x = nextX;
-  player.position.y = verticalResult.y;
-  player.onGround = verticalResult.onGround;
-
-  const goalRect = state.level.goal;
-  if (goalRect) {
-    const playerRect = {
+  function resolveCollisions(player) {
+    if (!level) return;
+    player.grounded = false;
+    const rect = {
       x: player.position.x,
       y: player.position.y,
       width: player.width,
       height: player.height,
     };
-    player.goalReached = rectsIntersect(playerRect, goalRect);
-  }
-}
-
-function updateNPC(delta) {
-  if (!state.level || !state.level.npc) return;
-  const npc = state.level.npc;
-  if (!npcState.targetText) {
-    npcState.targetText = npc.messages?.[npcState.messageIndex] || "";
-    npcState.displayedText = "";
-    npcState.timer = 0;
-    npcState.pauseTimer = 0;
-  }
-  if (npcState.displayedText.length < npcState.targetText.length) {
-    npcState.timer += delta;
-    if (npcState.timer >= npcState.typingSpeed) {
-      npcState.timer = 0;
-      npcState.displayedText = npcState.targetText.slice(
-        0,
-        npcState.displayedText.length + 1
-      );
-    }
-  } else {
-    npcState.pauseTimer += delta;
-    if (npcState.pauseTimer >= npcState.pauseDuration) {
-      npcState.messageIndex = (npcState.messageIndex + 1) % (npc.messages?.length || 1);
-      npcState.targetText = npc.messages?.[npcState.messageIndex] || "";
-      npcState.displayedText = "";
-      npcState.timer = 0;
-      npcState.pauseTimer = 0;
-    }
-  }
-}
-
-function renderBackground() {
-  ctx.fillStyle = "#1a1a2e";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (!state.level) return;
-  ctx.fillStyle = "#2f314d";
-  (state.level.platforms || []).forEach((platform) => {
-    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
-  });
-  ctx.fillStyle = "#f8b195";
-  (state.level.walls || []).forEach((wall) => {
-    ctx.fillRect(wall.x, wall.y, wall.width, wall.height);
-  });
-  if (state.level.goal) {
-    const goal = state.level.goal;
-    const gradient = ctx.createLinearGradient(goal.x, goal.y, goal.x, goal.y + goal.height);
-    gradient.addColorStop(0, "#ffd166");
-    gradient.addColorStop(1, "#ff6b6b");
-    ctx.fillStyle = gradient;
-    ctx.fillRect(goal.x, goal.y, goal.width, goal.height);
-  }
-}
-
-function renderNPC() {
-  if (!state.level || !state.level.npc) return;
-  const npc = state.level.npc;
-  ctx.fillStyle = "#8bc34a";
-  ctx.fillRect(npc.x, npc.y, npc.width, npc.height);
-
-  const text = npcState.displayedText;
-  if (!text) return;
-
-  const padding = 10;
-  const boxWidth = 280;
-  const lineHeight = 16;
-  const lines = wrapText(text, 32);
-  const boxHeight = lines.length * lineHeight + padding * 2;
-  const boxX = Math.min(npc.x + npc.width + 10, canvas.width - boxWidth - 10);
-  const boxY = npc.y - boxHeight - 10;
-
-  ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
-  ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
-  ctx.strokeStyle = "#8bc34a";
-  ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
-  ctx.fillStyle = "#dcedc8";
-  ctx.font = "12px 'Press Start 2P', monospace";
-  lines.forEach((line, index) => {
-    ctx.fillText(line, boxX + padding, boxY + padding + lineHeight * (index + 1) - 4);
-  });
-}
-
-function wrapText(text, maxChars) {
-  const words = text.split(" ");
-  const lines = [];
-  let current = "";
-  words.forEach((word) => {
-    const testLine = current ? `${current} ${word}` : word;
-    if (testLine.length > maxChars) {
-      if (current) {
-        lines.push(current);
-        current = word;
-      } else {
-        lines.push(word);
-        current = "";
+    const colliders = level.platforms || [];
+    for (const platform of colliders) {
+      if (
+        player.abilityState.phaseActive &&
+        player.abilityId === "phase-walker" &&
+        platform.type === "wall"
+      ) {
+        continue;
       }
-    } else {
-      current = testLine;
+      const tile = {
+        x: platform.x,
+        y: platform.y,
+        width: platform.width,
+        height: platform.height,
+      };
+      if (!rectanglesIntersect(rect, tile)) {
+        continue;
+      }
+      const overlapLeft = rect.x + rect.width - tile.x;
+      const overlapRight = tile.x + tile.width - rect.x;
+      const overlapTop = rect.y + rect.height - tile.y;
+      const overlapBottom = tile.y + tile.height - rect.y;
+
+      const minHorizontal = Math.min(overlapLeft, overlapRight);
+      const minVertical = Math.min(overlapTop, overlapBottom);
+
+      if (minHorizontal < minVertical) {
+        if (overlapLeft < overlapRight) {
+          rect.x -= overlapLeft;
+        } else {
+          rect.x += overlapRight;
+        }
+        player.velocity.x = 0;
+      } else {
+        if (overlapTop < overlapBottom) {
+          rect.y -= overlapTop;
+          if (player.gravityDir === 1) {
+            player.grounded = true;
+            player.velocity.y = 0;
+          } else {
+            player.velocity.y = Math.min(player.velocity.y, 0);
+          }
+        } else {
+          rect.y += overlapBottom;
+          if (player.gravityDir === -1) {
+            player.grounded = true;
+            player.velocity.y = 0;
+          } else {
+            player.velocity.y = Math.max(player.velocity.y, 0);
+          }
+        }
+      }
     }
-  });
-  if (current) {
-    lines.push(current);
+    player.position.x = rect.x;
+    player.position.y = rect.y;
   }
-  return lines;
-}
 
-function renderPlayers() {
-  state.players.forEach((player, id) => {
-    if (!player.position) return;
-    ctx.fillStyle = player.color || "#ffffff";
-    if (player.goalReached) {
-      ctx.fillStyle = "#f4f1de";
+  function updateAbilityTimers(player, delta) {
+    const state = player.abilityState;
+    if (state.phaseActive) {
+      state.phaseTimer -= delta;
+      if (state.phaseTimer <= 0) {
+        state.phaseTimer = 0;
+        state.phaseActive = false;
+      }
     }
-    ctx.fillRect(player.position.x, player.position.y, player.width, player.height);
-
-    ctx.fillStyle = "#000";
-    ctx.font = "10px 'Press Start 2P', monospace";
-    ctx.fillText(
-      player.abilityName || "Spectator",
-      player.position.x - 6,
-      player.position.y - 6
-    );
-  });
-}
-
-function render() {
-  renderBackground();
-  renderNPC();
-  renderPlayers();
-}
-
-function updateTimerDisplay(now) {
-  const elapsed = state.levelComplete
-    ? state.completeTime
-    : Math.max(0, now - state.startTime);
-  const totalSeconds = elapsed / 1000;
-  const minutes = Math.floor(totalSeconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = (totalSeconds % 60).toFixed(3).padStart(6, "0");
-  timerEl.textContent = `${minutes}:${seconds}`;
-}
-
-function gameLoop(now) {
-  if (!gameLoop.last) {
-    gameLoop.last = now;
+    if (state.dashActive) {
+      state.dashTimer -= delta;
+      if (state.dashTimer <= 0) {
+        state.dashTimer = 0;
+        state.dashActive = false;
+      }
+    }
+    if (state.ceilingActive) {
+      state.ceilingTimer -= delta;
+      if (state.ceilingTimer <= 0) {
+        state.ceilingTimer = 0;
+        state.ceilingActive = false;
+        player.gravityDir = 1;
+      }
+    }
   }
-  const delta = now - gameLoop.last;
-  gameLoop.last = now;
 
-  updateStatus(now);
-  const player = state.players.get(state.localPlayerId);
-  if (player && !player.spectator && !state.levelComplete) {
-    updateLocalPlayer(player, delta);
-    socket.emit("playerUpdate", {
+  function stepPlayer(player, delta) {
+    updateAbilityTimers(player, delta);
+    if (player.id === localPlayerId) {
+      applyInputToPlayer(player, delta);
+    }
+    const gravity = (level?.world.gravity || 0) * player.gravityDir;
+    player.velocity.y += gravity * delta;
+    if (player.velocity.y > constants.maxFallSpeed) {
+      player.velocity.y = constants.maxFallSpeed;
+    }
+    if (player.velocity.y < -constants.maxFallSpeed) {
+      player.velocity.y = -constants.maxFallSpeed;
+    }
+
+    player.position.x += player.velocity.x * delta;
+    player.position.y += player.velocity.y * delta;
+
+    resolveCollisions(player);
+    clampWorld(player);
+  }
+
+  function emitPlayerState(player) {
+    if (!player || !socket.connected || !level) {
+      return;
+    }
+    socket.emit("playerState", {
       position: player.position,
       velocity: player.velocity,
-      goalReached: player.goalReached,
+      facing: player.facing,
+      moving: Math.abs(player.velocity.x) > 0.5 || Math.abs(player.velocity.y) > 0.5,
+      onGround: player.grounded,
+      abilityState: player.abilityState,
     });
-  } else {
-    updateAbilityTimers(delta);
   }
 
-  updateNPC(delta);
-  updateTimerDisplay(now);
-  render();
-
-  requestAnimationFrame(gameLoop);
-}
-
-function resetNPCState() {
-  npcState.messageIndex = 0;
-  npcState.targetText = "";
-  npcState.displayedText = "";
-  npcState.timer = 0;
-  npcState.pauseTimer = 0;
-}
-
-socket.on("initialState", (payload) => {
-  state.localPlayerId = payload.playerId;
-  state.startTime = payload.startTime;
-  state.level = payload.level;
-  state.levelComplete = false;
-  state.completeTime = 0;
-  state.players.clear();
-  payload.players.forEach((player) => {
-    state.players.set(player.id, createPlayer(player));
-  });
-  updateAbilityInfo();
-  updateLeaderboard(payload.leaderboard || []);
-  resetAbilityEffects();
-  resetNPCState();
-  leaderboardEl.classList.add("hidden");
-  requestAnimationFrame(gameLoop);
-});
-
-socket.on("playerJoined", ({ player }) => {
-  state.players.set(player.id, createPlayer(player));
-});
-
-socket.on("playerLeft", ({ id }) => {
-  state.players.delete(id);
-});
-
-socket.on("playerState", ({ id, position, velocity, goalReached }) => {
-  const player = state.players.get(id);
-  if (!player) return;
-  player.position = position;
-  player.velocity = velocity;
-  player.goalReached = goalReached;
-});
-
-socket.on("levelReset", ({ level, startTime, players, leaderboard }) => {
-  state.level = level;
-  state.startTime = startTime;
-  state.levelComplete = false;
-  state.completeTime = 0;
-  resetAbilityEffects();
-  resetNPCState();
-  leaderboardEl.classList.add("hidden");
-  players.forEach((player) => {
-    state.players.set(player.id, createPlayer(player));
-  });
-  updateAbilityInfo();
-  updateLeaderboard(leaderboard);
-  setStatus("Level reset. Abilities refreshed!", 1500);
-});
-
-socket.on("levelComplete", ({ timeMs, leaderboard }) => {
-  state.levelComplete = true;
-  state.completeTime = timeMs;
-  updateLeaderboard(leaderboard);
-  leaderboardEl.classList.remove("hidden");
-  setStatus("Level complete! Resetting soon...", 4000);
-});
-
-socket.on("abilityActivated", ({ ability }) => {
-  activateAbility(ability);
-});
-
-socket.on("abilityDenied", ({ reason }) => {
-  setStatus(reason || "Ability denied.", 1500);
-});
-
-socket.on("abilityStatus", ({ id }) => {
-  const player = state.players.get(id);
-  if (player) {
-    player.abilityUsed = true;
+  function renderBackground() {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
-});
 
-window.addEventListener("keydown", (event) => {
-  if (["ArrowLeft", "ArrowRight", "ArrowUp", " "].includes(event.key)) {
-    event.preventDefault();
+  function renderPlatforms() {
+    if (!level) return;
+    ctx.fillStyle = "#fefefe";
+    (level.platforms || []).forEach((platform) => {
+      ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+    });
+    if (level.goal) {
+      ctx.fillStyle = "#9ef7ff";
+      ctx.fillRect(level.goal.x, level.goal.y, level.goal.width, level.goal.height);
+    }
   }
-  if (event.repeat) return;
-  switch (event.key) {
-    case "ArrowLeft":
-      input.left = true;
-      break;
-    case "ArrowRight":
-      input.right = true;
-      break;
-    case "ArrowUp":
-      if (!input.jump) {
-        input.jumpQueued = true;
+
+  function updateBobby(delta) {
+    if (!level?.bobby) {
+      return;
+    }
+    if (bobbyState.lines !== level.bobby.lines) {
+      bobbyState.lines = level.bobby.lines;
+      bobbyState.currentLine = 0;
+      bobbyState.charIndex = 0;
+      bobbyState.visibleText = "";
+      bobbyState.holdTimer = 0;
+      bobbyState.textSpeed = level.bobby.textSpeed || 40;
+    }
+    if (bobbyState.lines.length === 0) {
+      return;
+    }
+    bobbyState.holdTimer -= delta;
+    if (bobbyState.holdTimer > 0) {
+      return;
+    }
+    const line = bobbyState.lines[bobbyState.currentLine] || "";
+    if (bobbyState.charIndex < line.length) {
+      bobbyState.visibleText = line.slice(0, bobbyState.charIndex + 1);
+      bobbyState.charIndex += 1;
+      bobbyState.holdTimer = (bobbyState.textSpeed || 40) / 1000;
+    } else {
+      bobbyState.holdTimer = 1.8;
+      bobbyState.currentLine = (bobbyState.currentLine + 1) % bobbyState.lines.length;
+      bobbyState.charIndex = 0;
+    }
+  }
+
+  function renderBobby() {
+    if (!level?.bobby) {
+      return;
+    }
+    const npc = level.bobby;
+    ctx.fillStyle = "#fefefe";
+    ctx.fillRect(npc.x, npc.y, npc.width, npc.height);
+    if (bobbyState.visibleText) {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+      ctx.fillRect(npc.x - 10, npc.y - 60, 260, 48);
+      ctx.strokeStyle = "#fefefe";
+      ctx.strokeRect(npc.x - 10, npc.y - 60, 260, 48);
+      ctx.fillStyle = "#fefefe";
+      ctx.font = "20px VT323, monospace";
+      ctx.fillText(bobbyState.visibleText, npc.x - 4, npc.y - 32);
+    }
+  }
+
+  function renderPlayers() {
+    players.forEach((player) => {
+      const isLocal = player.id === localPlayerId;
+      const baseColor = isLocal ? "#ffffff" : "#c7c7c7";
+      ctx.fillStyle = baseColor;
+      ctx.fillRect(player.position.x, player.position.y, player.width, player.height);
+      if (player.abilityState.phaseActive) {
+        ctx.strokeStyle = "#9ef7ff";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(player.position.x - 2, player.position.y - 2, player.width + 4, player.height + 4);
       }
-      input.jump = true;
-      break;
-    case " ":
-      requestAbility();
-      break;
-    default:
-      break;
+      if (player.abilityState.ceilingActive) {
+        ctx.strokeStyle = "#ffda6b";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(player.position.x + player.width / 2, player.position.y - 6, 8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (player.abilityState.dashActive) {
+        ctx.strokeStyle = "#ff7b7b";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(player.position.x, player.position.y + player.height);
+        ctx.lineTo(player.position.x + player.width * player.abilityState.dashDirection, player.position.y + player.height);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "#000";
+      ctx.font = "16px VT323, monospace";
+      ctx.fillText(player.name || "?", player.position.x - 4, player.position.y - 6);
+    });
   }
-});
 
-window.addEventListener("keyup", (event) => {
-  switch (event.key) {
-    case "ArrowLeft":
-      input.left = false;
-      break;
-    case "ArrowRight":
-      input.right = false;
-      break;
-    case "ArrowUp":
-      input.jump = false;
-      input.jumpQueued = false;
-      break;
-    default:
-      break;
+  function render() {
+    renderBackground();
+    renderPlatforms();
+    renderBobby();
+    renderPlayers();
   }
-});
 
+  function update(delta) {
+    updateBobby(delta);
+    players.forEach((player) => {
+      if (player.id === localPlayerId) {
+        stepPlayer(player, delta);
+      } else {
+        updateAbilityTimers(player, delta);
+      }
+    });
+    const localPlayer = ensureLocalPlayer();
+    if (localPlayer) {
+      emitPlayerState(localPlayer);
+    }
+    updateTimerDisplay();
+    updateAbilityUI();
+  }
+
+  let lastFrameTime = performance.now();
+  function gameLoop() {
+    const now = performance.now();
+    const delta = Math.min((now - lastFrameTime) / 1000, 0.05);
+    lastFrameTime = now;
+    update(delta);
+    render();
+    requestAnimationFrame(gameLoop);
+  }
+
+  requestAnimationFrame(gameLoop);
+
+  function handleKeyDown(event) {
+    if (event.repeat) return;
+    switch (event.key) {
+      case "ArrowLeft":
+      case "a":
+      case "A":
+        inputState.left = true;
+        break;
+      case "ArrowRight":
+      case "d":
+      case "D":
+        inputState.right = true;
+        break;
+      case "ArrowUp":
+      case "w":
+      case "W":
+        inputState.jump = true;
+        break;
+      case " ":
+      case "Space":
+        triggerAbility();
+        break;
+      default:
+        break;
+    }
+  }
+
+  function handleKeyUp(event) {
+    switch (event.key) {
+      case "ArrowLeft":
+      case "a":
+      case "A":
+        inputState.left = false;
+        break;
+      case "ArrowRight":
+      case "d":
+      case "D":
+        inputState.right = false;
+        break;
+      case "ArrowUp":
+      case "w":
+      case "W":
+        inputState.jump = false;
+        break;
+      default:
+        break;
+    }
+  }
+
+  function triggerAbility() {
+    const player = ensureLocalPlayer();
+    if (!player || !abilityInfo) {
+      return;
+    }
+    if (session && session.waitingForPlayers) {
+      return;
+    }
+    if (player.abilityUsed || player.abilityState.phaseActive || player.abilityState.dashActive || player.abilityState.ceilingActive) {
+      return;
+    }
+    const context = {};
+    if (player.abilityId === "dash-sprinter") {
+      context.direction = player.facing >= 0 ? 1 : -1;
+    }
+    applyAbilityState(player, player.abilityId, context);
+    socket.emit("useAbility", { context });
+  }
+
+  joinForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name) {
+      joinError.textContent = "Enter a name first.";
+      return;
+    }
+    joinError.textContent = "";
+    socket.emit("registerPlayer", { name });
+  });
+
+  closeLeaderboardBtn.addEventListener("click", () => {
+    showLeaderboardOverlay(false);
+  });
+
+  window.addEventListener("keydown", handleKeyDown);
+  window.addEventListener("keyup", handleKeyUp);
+
+  socket.on("connect", () => {
+    statusLineEl.textContent = "";
+  });
+
+  socket.on("disconnect", () => {
+    statusLineEl.textContent = "Disconnected. Attempting reconnect...";
+  });
+
+  socket.on("initialData", (payload) => {
+    level = payload.level;
+    leaderboard = payload.leaderboard || [];
+    updateLeaderboardList();
+    setSession(payload.session);
+    if (level?.bobby) {
+      bobbyState.lines = level.bobby.lines || [];
+      bobbyState.currentLine = 0;
+      bobbyState.charIndex = 0;
+      bobbyState.visibleText = "";
+      bobbyState.textSpeed = level.bobby.textSpeed || 40;
+    }
+  });
+
+  socket.on("joinAccepted", ({ playerId, ability, session: newSession, leaderboard: lb }) => {
+    localPlayerId = playerId;
+    abilityInfo = ability;
+    leaderboard = lb || leaderboard;
+    updateLeaderboardList();
+    setSession(newSession);
+    setJoinScreenVisible(false);
+    updateAbilityUI();
+  });
+
+  socket.on("joinRejected", ({ reason }) => {
+    joinError.textContent = reason || "Unable to join.";
+  });
+
+  socket.on("sessionUpdate", ({ session: newSession }) => {
+    setSession(newSession);
+  });
+
+  socket.on("runReset", (payload) => {
+    handleRunReset(payload);
+  });
+
+  socket.on("playerState", ({ id, position, velocity, facing, abilityState }) => {
+    const player = players.get(id);
+    if (!player) {
+      return;
+    }
+    if (id !== localPlayerId) {
+      if (position) {
+        player.position.x = position.x;
+        player.position.y = position.y;
+      }
+      if (velocity) {
+        player.velocity.x = velocity.x;
+        player.velocity.y = velocity.y;
+      }
+      if (typeof facing === "number") {
+        player.facing = facing >= 0 ? 1 : -1;
+      }
+      if (abilityState) {
+        player.abilityState.phaseActive = Boolean(abilityState.phaseActive);
+        player.abilityState.dashActive = Boolean(abilityState.dashActive);
+        player.abilityState.ceilingActive = Boolean(abilityState.ceilingActive);
+      }
+    }
+  });
+
+  socket.on("abilityUsed", ({ playerId, abilityId, context }) => {
+    const player = players.get(playerId);
+    applyAbilityState(player, abilityId, context);
+  });
+
+  socket.on("abilityConfirmed", ({ playerId, abilityId, context }) => {
+    if (playerId === localPlayerId) {
+      applyAbilityState(players.get(playerId), abilityId, context);
+    }
+  });
+
+  socket.on("timerStarted", ({ startTime }) => {
+    timerState.running = true;
+    timerState.startTime = performance.now() - (Date.now() - startTime);
+  });
+
+  socket.on("runCompleted", ({ timeMs, leaderboard: lb, teamName }) => {
+    timerState.running = false;
+    timerState.elapsed = timeMs;
+    leaderboard = lb || leaderboard;
+    updateLeaderboardList();
+    completionTimeEl.textContent = `Team ${teamName || ""} — ${formatTime(timeMs)}`;
+    showLeaderboardOverlay(true);
+    updateStatusLine("Level complete!");
+  });
+})();

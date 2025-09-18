@@ -7,19 +7,46 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div id="ui">
-      <div id="timer">00:00.000</div>
-      <div id="ability-info">Ability: --</div>
-      <div id="status-message"></div>
-    </div>
-    <canvas id="game" width="960" height="540"></canvas>
-    <div id="leaderboard" class="hidden">
-      <h2>Top Team Times</h2>
-      <ol id="leaderboard-list"></ol>
+    <div id="app">
+      <div id="join-screen" class="panel visible">
+        <h1>Retro Co-op Prototype</h1>
+        <p>Enter a name to join the team.</p>
+        <form id="join-form">
+          <input
+            id="name-input"
+            type="text"
+            maxlength="20"
+            placeholder="Name"
+            autocomplete="off"
+            required
+          />
+          <button type="submit">Join</button>
+        </form>
+        <p id="join-error" class="error"></p>
+        <div class="hint">Up/Down: arrows · Jump: Up · Ability: Space</div>
+      </div>
+
+      <canvas id="game" width="960" height="540"></canvas>
+
+      <div id="hud">
+        <div id="timer-display">00:00.000</div>
+        <div id="ability-display">
+          <span id="ability-name">Ability</span>
+          <span id="ability-status">Waiting...</span>
+        </div>
+        <div id="status-line"></div>
+      </div>
+
+      <div id="leaderboard-overlay" class="panel hidden">
+        <h2>Level Complete!</h2>
+        <p id="completion-time"></p>
+        <h3>Top Runs</h3>
+        <ol id="leaderboard-list"></ol>
+        <button id="close-leaderboard">Back to Level</button>
+      </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/shared/levels.js"></script>
-    <script src="/js/game.js" type="module"></script>
+    <script src="/js/game.js"></script>
   </body>
 </html>
