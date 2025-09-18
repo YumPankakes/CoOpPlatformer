@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Co-op Platformer Prototype</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="ui">
+      <div id="timer">00:00.000</div>
+      <div id="ability-info">Ability: --</div>
+      <div id="status-message"></div>
+    </div>
+    <canvas id="game" width="960" height="540"></canvas>
+    <div id="leaderboard" class="hidden">
+      <h2>Top Team Times</h2>
+      <ol id="leaderboard-list"></ol>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/shared/levels.js"></script>
+    <script src="/js/game.js" type="module"></script>
+  </body>
+</html>
