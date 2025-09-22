@@ -126,6 +126,10 @@ button:focus {
   opacity: 0.7;
 }
 
+.hint a {
+  color: var(--accent);
+}
+
 #hud {
   position: absolute;
   top: 12px;
