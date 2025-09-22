@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Retro Platformer — 3 Levels</title>
+    <link rel="stylesheet" href="/retro-platformer.css" />
+  </head>
+  <body>
+    <div class="hud">
+      <span id="levelText">Level: 1 / 3</span>
+      |
+      <span id="timeText">00:00.000</span>
+      <button id="restartBtn">Restart</button>
+    </div>
+    <div class="canvas-wrapper">
+      <canvas id="game" width="900" height="520"></canvas>
+      <div id="overlay" class="overlay"></div>
+    </div>
+    <div class="panel">
+      <div class="card">
+        <h3>Leaderboard</h3>
+        <ol id="leaderboard"></ol>
+      </div>
+      <div class="card">Controls: ← → move, ↑/W/Space jump (double jump enabled)</div>
+    </div>
+
+    <script src="/js/retro-platformer.js"></script>
+  </body>
+</html>
